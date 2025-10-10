@@ -1,0 +1,89 @@
+name: Snowflake MLOps Pipeline via OIDC (WIF)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+     
+
+permissions:
+  id-token: write      # Needed for OIDC authentication
+  contents: read       # To allow repo checkout
+
+jobs:
+  run-mlops-pipeline:
+    runs-on: ubuntu-latest
+    environment: prod  # Matches SUBJECT in your Snowflake OIDC user definition
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false  # security best practice for OIDC
+
+      # Install Snowflake CLI from a specific GitHub branch, tag, or commit
+      - name: Install Snowflake CLI (from GitHub)
+        uses: snowflakedb/snowflake-cli-action@v2.0
+        with:
+          custom-github-ref: "main"    # or "v3.11.0", or "feature/oidc-fix"
+          use-oidc: true               # Enables Workload Identity Federation (OIDC)
+          cli-version: "3.11.0"        # Minimum version for OIDC support
+
+      - name: Test Snowflake Connection via OIDC
+        run: |
+          echo "🔗 Testing Snowflake OIDC connection..."
+          snow sql -x -q "
+            SELECT CURRENT_USER() AS USER_NAME,
+                   CURRENT_ROLE() AS ROLE,
+                   CURRENT_ACCOUNT() AS ACCOUNT,
+                   CURRENT_REGION() AS REGION;
+          "
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+
+      - name: Trigger ML Pipeline Task
+        run: |
+          echo "🚀 Executing ML pipeline in Snowflake..."
+          snow sql -x -q "
+            USE WAREHOUSE MLOPS_WH;
+            USE DATABASE POWERCONSUMPTION;
+            USE SCHEMA PUBLIC;
+            EXECUTE TASK TASK_1_DATA_INGESTION;
+          "
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+
+      - name: Verify Task Execution Status
+        run: |
+          echo "📊 Checking task history for last execution..."
+          snow sql -x -q "
+            SELECT NAME, STATE, COMPLETED_TIME, QUERY_ID
+            FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY())
+            WHERE NAME = 'TASK_1_DATA_INGESTION'
+            ORDER BY COMPLETED_TIME DESC
+            LIMIT 1;
+          "
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+
+      # Optional: Download latest ONNX model from stage
+      - name: Download Latest ONNX Model Artifact
+        run: |
+          echo "📥 Downloading latest ONNX model from Snowflake stage..."
+          snow sql -x -q "
+            USE WAREHOUSE MLOPS_WH;
+            USE DATABASE POWERCONSUMPTION;
+            USE SCHEMA PUBLIC;
+            GET @ML_MODELS_STAGE PATTERN='.*onnx' FILE://models;
+          "
+          echo "✅ Model files saved under ./models/"
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+
+      # Optional: Upload model to GitHub Artifacts for tracking
+      - name: Upload model as GitHub artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-onnx-model
+          path: models/
