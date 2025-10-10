@@ -15,14 +15,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # --------------------------
+      # Step 1: Checkout Repository
+      # --------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # --------------------------
+      # Step 2: Install Snowflake CLI (latest stable)
+      # --------------------------
       - name: Install Snowflake CLI
         uses: snowflakedb/snowflake-cli-action@v2.0
         with:
           use-pip-cache: true
 
+      # --------------------------
+      # Step 3: Debug Environment (Optional)
+      # --------------------------
+      - name: Debug Environment Variables
+        env:
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
+        run: |
+          echo "🔍 Checking environment variable values..."
+          echo "SNOWFLAKE_USER=${SNOWFLAKE_USER}"
+          echo "SNOWFLAKE_ACCOUNT=${SNOWFLAKE_ACCOUNT}"
+          echo "SNOWFLAKE_WAREHOUSE=${SNOWFLAKE_WAREHOUSE}"
+          echo "SNOWFLAKE_DATABASE=${SNOWFLAKE_DATABASE}"
+          echo "SNOWFLAKE_SCHEMA=${SNOWFLAKE_SCHEMA}"
+
+      # --------------------------
+      # Step 4: Configure Snowflake Connection
+      # --------------------------
       - name: Configure Snowflake Connection
         env:
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
@@ -34,21 +61,26 @@ jobs:
         run: |
           echo "🔧 Adding Snowflake CLI connection..."
           snow connection add myconn \
-            --account $SNOWFLAKE_ACCOUNT \
-            --username $SNOWFLAKE_USER \
-            --password "$SNOWFLAKE_PASSWORD" \
-            --warehouse $SNOWFLAKE_WAREHOUSE \
-            --database $SNOWFLAKE_DATABASE \
-            --schema $SNOWFLAKE_SCHEMA
-
+            --account "${SNOWFLAKE_ACCOUNT}" \
+            --username "${SNOWFLAKE_USER}" \
+            --password "${SNOWFLAKE_PASSWORD}" \
+            --warehouse "${SNOWFLAKE_WAREHOUSE}" \
+            --database "${SNOWFLAKE_DATABASE}" \
+            --schema "${SNOWFLAKE_SCHEMA}"
           echo "✅ Connection 'myconn' added successfully!"
           snow connection list
 
+      # --------------------------
+      # Step 5: Test Connection
+      # --------------------------
       - name: Test Snowflake Connection
         run: |
           echo "🔗 Testing Snowflake connection..."
           snow -c myconn sql -q "SELECT CURRENT_USER(), CURRENT_ACCOUNT(), CURRENT_REGION();"
 
+      # --------------------------
+      # Step 6: Trigger ML Pipeline Task
+      # --------------------------
       - name: Trigger Snowflake ML Pipeline
         run: |
           echo "🚀 Executing ML pipeline task..."
@@ -59,6 +91,9 @@ jobs:
             EXECUTE TASK TASK_1_DATA_INGESTION;
           "
 
+      # --------------------------
+      # Step 7: Check Task Execution Status
+      # --------------------------
       - name: Check Task Execution Status
         run: |
           echo "📊 Checking latest task status..."
@@ -70,6 +105,9 @@ jobs:
             LIMIT 1;
           "
 
+      # --------------------------
+      # Step 8 (Optional): Download Latest ONNX Model
+      # --------------------------
       - name: Download Latest ONNX Model
         run: |
           echo "📥 Downloading latest ONNX model from stage..."
@@ -82,6 +120,9 @@ jobs:
           "
           echo "✅ Model(s) downloaded to ./models"
 
+      # --------------------------
+      # Step 9 (Optional): Upload Model as Artifact
+      # --------------------------
       - name: Upload Model as Artifact
         uses: actions/upload-artifact@v4
         with:
