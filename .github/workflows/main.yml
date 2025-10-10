@@ -1,11 +1,11 @@
-name: Snowflake MLOps Pipeline (Classic Auth, Compatible)
+name: Snowflake MLOps Pipeline (Classic Auth)
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-      
+      - mlops
 
 permissions:
   contents: read
@@ -22,12 +22,13 @@ jobs:
         uses: actions/checkout@v4
 
       # --------------------------
-      # Step 2: Install Snowflake CLI (Action-compatible)
+      # Step 2: Install Latest Snowflake CLI (auto-managed)
       # --------------------------
       - name: Install Snowflake CLI
         uses: snowflakedb/snowflake-cli-action@v2.0
         with:
-          cli-version: "2.16.0"   # Works with connection add myconn syntax
+          # No cli-version specified — auto installs latest compatible release
+          use-pip-cache: true
 
       # --------------------------
       # Step 3: Configure Snowflake Connection
@@ -41,7 +42,7 @@ jobs:
           SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
           SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
-          echo "🔧 Adding Snowflake CLI connection (v2 syntax)..."
+          echo "🔧 Adding Snowflake CLI connection (auto version)..."
           export SNOWFLAKE_PASSWORD=$SNOWFLAKE_PASSWORD
           snow connection add myconn \
             --account $SNOWFLAKE_ACCOUNT \
