@@ -1,4 +1,4 @@
-name: Snowflake MLOps Pipeline via OIDC (WIF)
+name: Snowflake MLOps Pipeline (Classic Auth)
 
 on:
   workflow_dispatch:
@@ -8,79 +8,88 @@ on:
       - mlops
 
 permissions:
-  id-token: write      # Required for OIDC token
-  contents: read       # Needed to checkout repo
+  contents: read
 
 jobs:
   run-mlops-pipeline:
     runs-on: ubuntu-latest
-    environment: prod   # Must match SUBJECT in Snowflake OIDC user
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          persist-credentials: false  # Security best practice for OIDC
 
-      # ✅ Install Snowflake CLI from GitHub tag or branch (no cli-version)
-      - name: Install Snowflake CLI (from GitHub branch/tag)
+      # ✅ Install Snowflake CLI (from PyPI)
+      - name: Install Snowflake CLI
         uses: snowflakedb/snowflake-cli-action@v2.0
         with:
-          custom-github-ref: "v3.11.0"   # or "main" / "feature/my-branch"
-          use-oidc: true                 # Enables secure OIDC authentication
+          cli-version: "3.11.0"   # stable version, no OIDC needed
 
-      - name: Verify Snowflake OIDC Authentication
-        run: |
-          echo "🔗 Testing OIDC authentication to Snowflake..."
-          snow sql -x -q "
-            SELECT CURRENT_USER() AS USER_NAME,
-                   CURRENT_ROLE() AS ROLE,
-                   CURRENT_ACCOUNT() AS ACCOUNT,
-                   CURRENT_REGION() AS REGION;
-          "
+      # ✅ Configure Snowflake Connection (Classic Auth)
+      - name: Configure Snowflake Connection
         env:
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-
-      - name: Trigger ML Pipeline in Snowflake
+          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+          SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
-          echo "🚀 Executing ML pipeline..."
-          snow sql -x -q "
+          echo "🔧 Adding Snowflake CLI connection..."
+          snow connection add myconn \
+            --account $SNOWFLAKE_ACCOUNT \
+            --username $SNOWFLAKE_USER \
+            --password $SNOWFLAKE_PASSWORD \
+            --warehouse $SNOWFLAKE_WAREHOUSE \
+            --database $SNOWFLAKE_DATABASE \
+            --schema $SNOWFLAKE_SCHEMA
+          
+          echo "✅ Connection added successfully!"
+          snow connection list
+
+      # ✅ Test the Snowflake connection
+      - name: Test Snowflake Connection
+        run: |
+          echo "🔗 Testing Snowflake connection..."
+          snow -c myconn sql -q "SELECT CURRENT_USER(), CURRENT_ACCOUNT(), CURRENT_REGION();"
+
+      # ✅ Trigger your ML pipeline task in Snowflake
+      - name: Trigger Snowflake ML Pipeline Task
+        run: |
+          echo "🚀 Executing ML pipeline task..."
+          snow -c myconn sql -q "
             USE WAREHOUSE MLOPS_WH;
             USE DATABASE POWERCONSUMPTION;
             USE SCHEMA PUBLIC;
             EXECUTE TASK TASK_1_DATA_INGESTION;
           "
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
 
+      # ✅ Verify task status in Snowflake
       - name: Check Task Execution Status
         run: |
-          echo "📊 Checking last pipeline task execution..."
-          snow sql -x -q "
-            SELECT NAME, STATE, COMPLETED_TIME, QUERY_ID
+          echo "📊 Checking task status..."
+          snow -c myconn sql -q "
+            SELECT NAME, STATE, COMPLETED_TIME
             FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY())
             WHERE NAME = 'TASK_1_DATA_INGESTION'
             ORDER BY COMPLETED_TIME DESC
             LIMIT 1;
           "
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
 
-      - name: Download Latest ONNX Model (Optional)
+      # ✅ Optional: Download latest ONNX model
+      - name: Download Latest ONNX Model
         run: |
           echo "📥 Downloading latest ONNX model from stage..."
           mkdir -p models
-          snow sql -x -q "
+          snow -c myconn sql -q "
             USE WAREHOUSE MLOPS_WH;
             USE DATABASE POWERCONSUMPTION;
             USE SCHEMA PUBLIC;
             GET @ML_MODELS_STAGE PATTERN='.*onnx' FILE://models;
           "
-          echo "✅ Model(s) downloaded to ./models directory."
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          echo "✅ Model downloaded under ./models"
 
-      - name: Upload Model as Artifact (Optional)
+      # ✅ Optional: Upload model as artifact
+      - name: Upload Model as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: latest-onnx-model
