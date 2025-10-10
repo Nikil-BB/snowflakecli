@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - mlops
+      
 
 permissions:
   contents: read
@@ -15,16 +15,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # --------------------------
+      # Step 1: Checkout Repository
+      # --------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ✅ Install Snowflake CLI (from PyPI)
+      # --------------------------
+      # Step 2: Install Snowflake CLI
+      # --------------------------
       - name: Install Snowflake CLI
         uses: snowflakedb/snowflake-cli-action@v2.0
         with:
-          cli-version: "3.11.0"   # stable version, no OIDC needed
+          cli-version: "3.11.0"
 
-      # ✅ Configure Snowflake Connection (Classic Auth)
+      # --------------------------
+      # Step 3: Configure Connection
+      # --------------------------
       - name: Configure Snowflake Connection
         env:
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
@@ -34,25 +41,30 @@ jobs:
           SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
           SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
-          echo "🔧 Adding Snowflake CLI connection..."
-          snow connection add myconn \
+          echo "🔧 Adding Snowflake CLI connection (secure)..."
+          export SNOWFLAKE_PASSWORD=$SNOWFLAKE_PASSWORD
+          snow connection add \
+            --name myconn \
             --account $SNOWFLAKE_ACCOUNT \
             --username $SNOWFLAKE_USER \
-            --password $SNOWFLAKE_PASSWORD \
+            --password-env-var SNOWFLAKE_PASSWORD \
             --warehouse $SNOWFLAKE_WAREHOUSE \
             --database $SNOWFLAKE_DATABASE \
             --schema $SNOWFLAKE_SCHEMA
-          
-          echo "✅ Connection added successfully!"
+          echo "✅ Connection 'myconn' added successfully!"
           snow connection list
 
-      # ✅ Test the Snowflake connection
+      # --------------------------
+      # Step 4: Test the Connection
+      # --------------------------
       - name: Test Snowflake Connection
         run: |
           echo "🔗 Testing Snowflake connection..."
           snow -c myconn sql -q "SELECT CURRENT_USER(), CURRENT_ACCOUNT(), CURRENT_REGION();"
 
-      # ✅ Trigger your ML pipeline task in Snowflake
+      # --------------------------
+      # Step 5: Trigger ML Pipeline
+      # --------------------------
       - name: Trigger Snowflake ML Pipeline Task
         run: |
           echo "🚀 Executing ML pipeline task..."
@@ -63,10 +75,12 @@ jobs:
             EXECUTE TASK TASK_1_DATA_INGESTION;
           "
 
-      # ✅ Verify task status in Snowflake
+      # --------------------------
+      # Step 6: Check Task Status
+      # --------------------------
       - name: Check Task Execution Status
         run: |
-          echo "📊 Checking task status..."
+          echo "📊 Checking latest task status..."
           snow -c myconn sql -q "
             SELECT NAME, STATE, COMPLETED_TIME
             FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY())
@@ -75,22 +89,4 @@ jobs:
             LIMIT 1;
           "
 
-      # ✅ Optional: Download latest ONNX model
-      - name: Download Latest ONNX Model
-        run: |
-          echo "📥 Downloading latest ONNX model from stage..."
-          mkdir -p models
-          snow -c myconn sql -q "
-            USE WAREHOUSE MLOPS_WH;
-            USE DATABASE POWERCONSUMPTION;
-            USE SCHEMA PUBLIC;
-            GET @ML_MODELS_STAGE PATTERN='.*onnx' FILE://models;
-          "
-          echo "✅ Model downloaded under ./models"
-
-      # ✅ Optional: Upload model as artifact
-      - name: Upload Model as Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: latest-onnx-model
-          path: models/
+      #
