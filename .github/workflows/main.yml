@@ -4,10 +4,10 @@ on:
   push:
     branches:
       - main
-      - mlops
+      
 
 permissions:
-  contents: write   # Required to push new model files back to the repo
+  contents: write   # Needed to push downloaded models to the repo
 
 jobs:
   sync-latest-model:
@@ -30,6 +30,7 @@ jobs:
       # Step 3: Verify CLI Version
       # --------------------------
       - name: Verify Snowflake CLI Version
+        shell: bash
         run: |
           echo "🧩 Checking installed Snowflake CLI version..."
           snow --version
@@ -38,6 +39,7 @@ jobs:
       # Step 4: Configure Snowflake Connection (v2 syntax)
       # --------------------------
       - name: Configure Snowflake Connection
+        shell: bash
         env:
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
           SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
@@ -50,6 +52,61 @@ jobs:
           snow connection add \
             --connection-name myconn \
             --account "${SNOWFLAKE_ACCOUNT}" \
-            --username "${SNOWFLAKE_U_
+            --username "${SNOWFLAKE_USER}" \
+            --password "${SNOWFLAKE_PASSWORD}" \
+            --warehouse "${SNOWFLAKE_WAREHOUSE}" \
+            --database "${SNOWFLAKE_DATABASE}" \
+            --schema "${SNOWFLAKE_SCHEMA}"
+
+          echo "✅ Connection configured successfully!"
+          snow connection list
+
+      # --------------------------
+      # Step 5: Identify Latest Model in Snowflake
+      # --------------------------
+      - name: Identify Latest Model
+        id: get_model
+        shell: bash
+        run: |
+          echo "🔍 Fetching latest model name from Snowflake..."
+          MODEL_NAME=$(snow -c myconn sql -q "
+            SELECT NAME
+            FROM MODELS
+            ORDER BY CREATED DESC
+            LIMIT 1;
+          " --output-format plain | tail -n 1 | tr -d '[:space:]')
+          echo "MODEL_NAME=${MODEL_NAME}" >> "$GITHUB_ENV"
+          echo "✅ Latest model: ${MODEL_NAME}"
+
+      # --------------------------
+      # Step 6: Download Latest Model from Stage
+      # --------------------------
+      - name: Download Latest Model
+        shell: bash
+        run: |
+          echo "📥 Downloading model ${MODEL_NAME} from Snowflake stage..."
+          mkdir -p models
+          snow -c myconn sql -q "
+            USE DATABASE POWERCONSUMPTION;
+            USE SCHEMA PUBLIC;
+            GET @ML_MODELS_STAGE PATTERN='${MODEL_NAME}.*onnx' FILE://models;
+          "
+          echo "✅ Model files downloaded:"
+          ls -lh models
+
+      # --------------------------
+      # Step 7: Commit and Push Model to GitHub
+      # --------------------------
+      - name: Commit and Push Latest Model
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "💾 Committing latest model ${MODEL_NAME}..."
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add models/
+          git commit -m "Sync latest Snowflake model: ${MODEL_NAME}" || echo "No changes to commit."
+          git push
 
 
