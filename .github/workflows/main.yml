@@ -1,60 +1,33 @@
-name: Snowflake MLOps Pipeline (Classic Auth - Final v3 Syntax)
+name: Sync Latest Model from Snowflake on Push
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
-      
+      - mlops
 
 permissions:
-  contents: read
+  contents: write   # required to push model back to repo
 
 jobs:
-  run-mlops-pipeline:
+  sync-latest-model:
     runs-on: ubuntu-latest
 
     steps:
       # --------------------------
-      # Step 1: Checkout Repository
+      # Step 1: Checkout Code
       # --------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       # --------------------------
-      # Step 2: Install Latest Snowflake CLI
+      # Step 2: Install Snowflake CLI
       # --------------------------
-      - name: Install Snowflake CLI (latest)
+      - name: Install Snowflake CLI
         uses: snowflakedb/snowflake-cli-action@v2.0
 
       # --------------------------
-      # Step 3: Confirm CLI Version
-      # --------------------------
-      - name: Show Snowflake CLI Version
-        run: |
-          echo "✅ Installed Snowflake CLI version:"
-          snow --version
-
-      # --------------------------
-      # Step 4: Debug Environment Variables
-      # --------------------------
-      - name: Debug Environment Variables
-        env:
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
-          SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
-        run: |
-          echo "🔍 Checking environment variable values..."
-          echo "SNOWFLAKE_USER=${SNOWFLAKE_USER}"
-          echo "SNOWFLAKE_ACCOUNT=${SNOWFLAKE_ACCOUNT}"
-          echo "SNOWFLAKE_WAREHOUSE=${SNOWFLAKE_WAREHOUSE}"
-          echo "SNOWFLAKE_DATABASE=${SNOWFLAKE_DATABASE}"
-          echo "SNOWFLAKE_SCHEMA=${SNOWFLAKE_SCHEMA}"
-
-      # --------------------------
-      # Step 5: Configure Snowflake Connection
+      # Step 3: Configure Connection (v2 syntax)
       # --------------------------
       - name: Configure Snowflake Connection
         env:
@@ -65,65 +38,36 @@ jobs:
           SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
           SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
-          echo "🔧 Adding Snowflake CLI connection..."
-          snow connection add \
-            --name myconn \
+          echo "🔧 Configuring Snowflake connection..."
+          snow connection add myconn \
             --account "${SNOWFLAKE_ACCOUNT}" \
             --username "${SNOWFLAKE_USER}" \
             --password "${SNOWFLAKE_PASSWORD}" \
             --warehouse "${SNOWFLAKE_WAREHOUSE}" \
             --database "${SNOWFLAKE_DATABASE}" \
             --schema "${SNOWFLAKE_SCHEMA}"
-          
-          echo "✅ Connection 'myconn' added successfully!"
-          snow connection list
+          echo "✅ Connection configured successfully!"
 
       # --------------------------
-      # Step 6: Test Snowflake Connection
+      # Step 4: Identify Latest Model
       # --------------------------
-      - name: Test Snowflake Connection
+      - name: Identify Latest Model
+        id: get_model
         run: |
-          echo "🔗 Testing Snowflake connection..."
-          snow -c myconn sql -q "SELECT CURRENT_USER(), CURRENT_ACCOUNT(), CURRENT_REGION();"
-
-      # --------------------------
-      # Step 7: Trigger ML Pipeline Task
-      # --------------------------
-      - name: Trigger Snowflake ML Pipeline
-        run: |
-          echo "🚀 Executing ML pipeline task..."
-          snow -c myconn sql -q "
-            USE WAREHOUSE MLOPS_WH;
-            USE DATABASE POWERCONSUMPTION;
-            USE SCHEMA PUBLIC;
-            EXECUTE TASK TASK_1_DATA_INGESTION;
-          "
-
-      # --------------------------
-      # Step 8: Check Task Execution Status
-      # --------------------------
-      - name: Check Task Execution Status
-        run: |
-          echo "📊 Checking latest task status..."
-          snow -c myconn sql -q "
-            SELECT NAME, STATE, COMPLETED_TIME
-            FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY())
-            WHERE NAME = 'TASK_1_DATA_INGESTION'
-            ORDER BY COMPLETED_TIME DESC
+          echo "🔍 Fetching latest model name from Snowflake..."
+          MODEL_NAME=$(snow -c myconn sql -q "
+            SELECT NAME
+            FROM MODELS
+            ORDER BY CREATED DESC
             LIMIT 1;
-          "
+          " --output-format plain | tail -n 1 | tr -d '[:space:]')
+          echo "MODEL_NAME=${MODEL_NAME}" >> $GITHUB_ENV
+          echo "✅ Latest model: ${MODEL_NAME}"
 
       # --------------------------
-      # Step 9 (Optional): Download Latest ONNX Model
+      # Step 5: Download Latest Model
       # --------------------------
-      - name: Download Latest ONNX Model
+      - name: Download Latest Model
         run: |
-          echo "📥 Downloading latest ONNX model from stage..."
-          mkdir -p models
-          snow -c myconn sql -q "
-            USE WAREHOUSE MLOPS_WH;
-            USE DATABASE POWERCONSUMPTION;
-            USE SCHEMA PUBLIC;
-            GET @ML_MODELS_STAGE PATTERN='.*onnx' FILE://models;
-          "
-          echo "✅
+          echo "📥 Downloading ${MODEL_NAME} from Snowflake stage.._
+
