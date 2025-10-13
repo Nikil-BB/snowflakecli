@@ -7,7 +7,7 @@ on:
       - mlops
 
 permissions:
-  contents: write   # required to push model back to repo
+  contents: write   # Required to push new model files back to the repo
 
 jobs:
   sync-latest-model:
@@ -15,7 +15,7 @@ jobs:
 
     steps:
       # --------------------------
-      # Step 1: Checkout Code
+      # Step 1: Checkout Repository
       # --------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -27,7 +27,15 @@ jobs:
         uses: snowflakedb/snowflake-cli-action@v2.0
 
       # --------------------------
-      # Step 3: Configure Connection (v2 syntax)
+      # Step 3: Verify CLI Version
+      # --------------------------
+      - name: Verify Snowflake CLI Version
+        run: |
+          echo "🧩 Checking installed Snowflake CLI version..."
+          snow --version
+
+      # --------------------------
+      # Step 4: Configure Snowflake Connection (v2 syntax)
       # --------------------------
       - name: Configure Snowflake Connection
         env:
@@ -39,35 +47,9 @@ jobs:
           SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
           echo "🔧 Configuring Snowflake connection..."
-          snow connection add myconn \
+          snow connection add \
+            --connection-name myconn \
             --account "${SNOWFLAKE_ACCOUNT}" \
-            --username "${SNOWFLAKE_USER}" \
-            --password "${SNOWFLAKE_PASSWORD}" \
-            --warehouse "${SNOWFLAKE_WAREHOUSE}" \
-            --database "${SNOWFLAKE_DATABASE}" \
-            --schema "${SNOWFLAKE_SCHEMA}"
-          echo "✅ Connection configured successfully!"
+            --username "${SNOWFLAKE_U_
 
-      # --------------------------
-      # Step 4: Identify Latest Model
-      # --------------------------
-      - name: Identify Latest Model
-        id: get_model
-        run: |
-          echo "🔍 Fetching latest model name from Snowflake..."
-          MODEL_NAME=$(snow -c myconn sql -q "
-            SELECT NAME
-            FROM MODELS
-            ORDER BY CREATED DESC
-            LIMIT 1;
-          " --output-format plain | tail -n 1 | tr -d '[:space:]')
-          echo "MODEL_NAME=${MODEL_NAME}" >> $GITHUB_ENV
-          echo "✅ Latest model: ${MODEL_NAME}"
-
-      # --------------------------
-      # Step 5: Download Latest Model
-      # --------------------------
-      - name: Download Latest Model
-        run: |
-          echo "📥 Downloading ${MODEL_NAME} from Snowflake stage.._
 
