@@ -1,16 +1,17 @@
-name: Sync Latest Model from Snowflake on Push
+name: Deploy Latest ONNX Model from Snowflake
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-      
+      - mlops
 
 permissions:
-  contents: write   # Needed to push downloaded models to the repo
+  contents: write
 
 jobs:
-  sync-latest-model:
+  deploy-latest-onnx:
     runs-on: ubuntu-latest
 
     steps:
@@ -36,7 +37,7 @@ jobs:
           snow --version
 
       # --------------------------
-      # Step 4: Configure Snowflake Connection (v2 syntax)
+      # Step 4: Configure Snowflake Connection (env-based)
       # --------------------------
       - name: Configure Snowflake Connection
         shell: bash
@@ -44,69 +45,66 @@ jobs:
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
           SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
           SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
           SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
           SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
           echo "🔧 Configuring Snowflake connection..."
-          snow connection add \
-            --connection-name myconn \
-            --account "${SNOWFLAKE_ACCOUNT}" \
-            --username "${SNOWFLAKE_USER}" \
-            --password "${SNOWFLAKE_PASSWORD}" \
-            --warehouse "${SNOWFLAKE_WAREHOUSE}" \
-            --database "${SNOWFLAKE_DATABASE}" \
-            --schema "${SNOWFLAKE_SCHEMA}"
+          export SNOWFLAKE_ACCOUNT
+          export SNOWFLAKE_USER
+          export SNOWFLAKE_PASSWORD
+          export SNOWFLAKE_ROLE
+          export SNOWFLAKE_WAREHOUSE
+          export SNOWFLAKE_DATABASE
+          export SNOWFLAKE_SCHEMA
 
+          snow connection add --connection-name myconn --use-env
           echo "✅ Connection configured successfully!"
           snow connection list
 
       # --------------------------
-      # Step 5: Identify Latest Model in Snowflake
+      # Step 5: Identify Latest ONNX Model File
       # --------------------------
-      - name: Identify Latest Model
-        id: get_model
+      - name: Identify Latest ONNX File
+        id: latest_model
         shell: bash
         run: |
-          echo "🔍 Fetching latest model name from Snowflake..."
-          MODEL_NAME=$(snow -c myconn sql -q "
-            SELECT NAME
-            FROM MODELS
-            ORDER BY CREATED DESC
-            LIMIT 1;
-          " --output-format plain | tail -n 1 | tr -d '[:space:]')
-          echo "MODEL_NAME=${MODEL_NAME}" >> "$GITHUB_ENV"
-          echo "✅ Latest model: ${MODEL_NAME}"
+          echo "🔍 Fetching latest ONNX model file name..."
+          MODEL_FILE=$(snow -c myconn sql -q "
+            LIST @ML_MODELS_STAGE;
+          " --output-format plain | grep '.onnx' | sort -k6,6r | head -n1 | awk '{print $1}' | tr -d '[:space:]')
+          echo "MODEL_FILE=${MODEL_FILE}" >> $GITHUB_ENV
+          echo "✅ Latest model: ${MODEL_FILE}"
 
       # --------------------------
-      # Step 6: Download Latest Model from Stage
+      # Step 6: Download the Latest ONNX Model
       # --------------------------
-      - name: Download Latest Model
+      - name: Download Latest ONNX Model
         shell: bash
         run: |
-          echo "📥 Downloading model ${MODEL_NAME} from Snowflake stage..."
+          echo "📥 Downloading ${MODEL_FILE} from Snowflake stage..."
           mkdir -p models
           snow -c myconn sql -q "
-            USE DATABASE POWERCONSUMPTION;
-            USE SCHEMA PUBLIC;
-            GET @ML_MODELS_STAGE PATTERN='${MODEL_NAME}.*onnx' FILE://models;
+            GET @ML_MODELS_STAGE/${MODEL_FILE} FILE://models;
           "
           echo "✅ Model files downloaded:"
           ls -lh models
 
       # --------------------------
-      # Step 7: Commit and Push Model to GitHub
+      # Step 7: Commit and Push Latest Model
       # --------------------------
       - name: Commit and Push Latest Model
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "💾 Committing latest model ${MODEL_NAME}..."
+          echo "💾 Committing latest ONNX model ${MODEL_FILE}..."
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           git add models/
-          git commit -m "Sync latest Snowflake model: ${MODEL_NAME}" || echo "No changes to commit."
+          git commit -m "Deploy latest ONNX model: ${MODEL_FILE}" || echo "No new model to commit."
           git push
+
 
 
