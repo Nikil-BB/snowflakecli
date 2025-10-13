@@ -1,11 +1,11 @@
 name: Deploy Latest ONNX Model from Snowflake
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
       - mlops
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -37,7 +37,7 @@ jobs:
           snow --version
 
       # --------------------------
-      # Step 4: Configure Snowflake Connection (env-based)
+      # Step 4: Configure Snowflake Connection (v2 syntax)
       # --------------------------
       - name: Configure Snowflake Connection
         shell: bash
@@ -51,15 +51,17 @@ jobs:
           SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
           echo "🔧 Configuring Snowflake connection..."
-          export SNOWFLAKE_ACCOUNT
-          export SNOWFLAKE_USER
-          export SNOWFLAKE_PASSWORD
-          export SNOWFLAKE_ROLE
-          export SNOWFLAKE_WAREHOUSE
-          export SNOWFLAKE_DATABASE
-          export SNOWFLAKE_SCHEMA
 
-          snow connection add --connection-name myconn --use-env
+          snow connection add \
+            --connection-name myconn \
+            --account "${SNOWFLAKE_ACCOUNT}" \
+            --username "${SNOWFLAKE_USER}" \
+            --password "${SNOWFLAKE_PASSWORD}" \
+            --warehouse "${SNOWFLAKE_WAREHOUSE}" \
+            --database "${SNOWFLAKE_DATABASE}" \
+            --schema "${SNOWFLAKE_SCHEMA}" \
+            --rolename "${SNOWFLAKE_ROLE}"
+
           echo "✅ Connection configured successfully!"
           snow connection list
 
@@ -78,7 +80,7 @@ jobs:
           echo "✅ Latest model: ${MODEL_FILE}"
 
       # --------------------------
-      # Step 6: Download the Latest ONNX Model
+      # Step 6: Download Latest ONNX Model
       # --------------------------
       - name: Download Latest ONNX Model
         shell: bash
@@ -86,13 +88,15 @@ jobs:
           echo "📥 Downloading ${MODEL_FILE} from Snowflake stage..."
           mkdir -p models
           snow -c myconn sql -q "
+            USE DATABASE ${SNOWFLAKE_DATABASE};
+            USE SCHEMA ${SNOWFLAKE_SCHEMA};
             GET @ML_MODELS_STAGE/${MODEL_FILE} FILE://models;
           "
           echo "✅ Model files downloaded:"
           ls -lh models
 
       # --------------------------
-      # Step 7: Commit and Push Latest Model
+      # Step 7: Commit and Push Latest Model to GitHub
       # --------------------------
       - name: Commit and Push Latest Model
         shell: bash
