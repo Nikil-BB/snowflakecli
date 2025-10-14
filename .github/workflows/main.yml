@@ -20,27 +20,38 @@ jobs:
       - name: Install Snowflake CLI
         shell: bash
         run: |
-          echo "🐍 Installing Snowflake CLI (v3)..."
+          echo "🐍 Installing Snowflake CLI (v3.12.0)..."
           python3 -m pip install --upgrade pip
           pip install --upgrade "snowflake-cli>=3.10.0"
           snow --version
 
-      # Step 2: Fetch and Deploy Latest ONNX Model using env variables (no connection add)
+      # Step 2: Debug Environment
+      - name: Debug - Show Environment
+        shell: bash
+        run: |
+          echo "🔎 Checking Environment Variables..."
+          env | grep SNOWFLAKE || echo "⚠️ No Snowflake environment variables found!"
+
+      # Step 3: Fetch and Deploy Latest ONNX Model
       - name: Fetch and Deploy Latest ONNX Model
         shell: bash
         env:
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
-          SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+          SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
-          echo "🔗 Connecting to Snowflake using environment variables..."
-          echo "🔍 Finding latest ONNX model..."
+          echo "🔗 Connecting to Snowflake using environment-based DEFAULT connection..."
+          echo "🔧 Connection test..."
+          snow connection test || echo "⚠️ Connection test failed, printing diagnostics..."
 
-          # list all ONNX models in the stage
+          echo "🔍 Listing connections..."
+          snow connection list || echo "⚠️ No connections detected."
+
+          echo "🔍 Finding latest ONNX model..."
           MODEL_FILE=$(snow sql -q "LIST @ML_MODELS_STAGE;" --format CSV \
             | grep '.onnx' \
             | sort -t',' -k6,6r \
@@ -58,8 +69,8 @@ jobs:
           echo "📥 Downloading ${MODEL_FILE}..."
           mkdir -p models
           snow sql -q "
-            USE DATABASE ${SNOWFLAKE_DATABASE};
-            USE SCHEMA ${SNOWFLAKE_SCHEMA};
+            USE DATABASE ${SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE};
+            USE SCHEMA ${SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA};
             GET @ML_MODELS_STAGE/${MODEL_FILE} FILE://models;
           " --format CSV
 
@@ -72,6 +83,7 @@ jobs:
           git add models/
           git commit -m "Deploy latest ONNX model: ${MODEL_FILE}" || echo "No new model to commit."
           git push
+
 
 
 
