@@ -1,4 +1,4 @@
-name: Deploy Latest ONNX Model (debuggable, job-level env)
+name: Deploy Latest ONNX Model from Snowflake
 
 on:
   workflow_dispatch:
@@ -14,7 +14,6 @@ jobs:
   deploy-latest-onnx:
     runs-on: ubuntu-latest
 
-    # ---- Job-level environment: every step inherits these ----
     env:
       SNOWFLAKE_CONNECTIONS_DEFAULT_USER: ${{ secrets.SNOWFLAKE_USER }}
       SNOWFLAKE_CONNECTIONS_DEFAULT_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
@@ -31,46 +30,28 @@ jobs:
       - name: Install Snowflake CLI (v3)
         shell: bash
         run: |
-          echo "🐍 Installing Snowflake CLI (v3)..."
+          echo "🐍 Installing Snowflake CLI..."
           python3 -m pip install --upgrade pip
           pip install --user --upgrade "snowflake-cli>=3.10.0"
           echo 'export PATH=$HOME/.local/bin:$PATH' >> $GITHUB_ENV
-          source $GITHUB_ENV || true
-          snow --version || true
+          source $GITHUB_ENV
+          snow --version
 
-      - name: Debug — show job-level Snowflake env variables
+      - name: Verify Snowflake connection
         shell: bash
         run: |
-          echo "🔎 Showing environment variables (job-level)"
-          echo "SNOWFLAKE_CONNECTIONS_DEFAULT_USER='${SNOWFLAKE_CONNECTIONS_DEFAULT_USER:-<missing>}'"
-          echo "SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT='${SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT:-<missing>}'"
-          echo "SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE='${SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE:-<missing>}'"
-          echo "SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE='${SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE:-<missing>}'"
-          echo "SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE='${SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE:-<missing>}'"
-          echo "SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA='${SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA:-<missing>}'"
-          echo "------------------------"
-          echo "env | grep SNOWFLAKE:"
-          env | grep SNOWFLAKE || true
+          echo "🔎 Verifying Snowflake connection..."
+          snow sql -q "SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_DATABASE(), CURRENT_SCHEMA();" --format CSV
 
-      - name: Debug — snow config & connections
-        shell: bash
-        run: |
-          echo "🔎 snow --version"
-          snow --version || true
-          echo "🔎 snow config list"
-          snow config list || true
-          echo "🔎 snow connection list"
-          snow connection list || true
-          echo "🔎 quick connection test (SELECT CURRENT_USER())"
-          snow sql -q "SELECT CURRENT_USER();" --format CSV || true
-
-      - name: Ensure fallback config file if env not detected
+      - name: Ensure fallback Snowflake config file if env not detected
         shell: bash
         run: |
           echo "🧩 Checking if snow sees default connection..."
           if snow connection list | grep -q "No data"; then
-            echo "⚠️ No connections found. Will write ~/.snowflake/config.toml as fallback."
+            echo "⚠️ No connections found. Writing ~/.snowflake/config.toml..."
             mkdir -p ~/.snowflake
+
+            # Safe heredoc with single quotes to avoid YAML parsing errors
             cat <<'EOF' > ~/.snowflake/config.toml
 [connections.default]
 account = "${SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT}"
@@ -81,49 +62,53 @@ warehouse = "${SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE}"
 database = "${SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE}"
 schema = "${SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA}"
 EOF
-            echo "✅ Wrote ~/.snowflake/config.toml"
+
+            echo "✅ Config file created successfully."
           else
-            echo "✅ Connection(s) already present; no config file written."
+            echo "✅ Snowflake connection(s) already available — skipping config file."
           fi
           echo "🔎 Post-check: snow connection list"
           snow connection list || true
 
-      - name: Find latest ONNX filename in stage
+      - name: Find latest ONNX file in Snowflake stage
         id: find_model
         shell: bash
         run: |
-          echo "🔍 Listing @ML_MODELS_STAGE and selecting newest .onnx file..."
+          echo "🔍 Searching for latest .onnx file in @ML_MODELS_STAGE..."
           LIST_OUT=$(snow sql -q "LIST @ML_MODELS_STAGE;" --format CSV)
-          echo "---- raw LIST output ----"
+          echo "---- Raw LIST output ----"
           echo "$LIST_OUT"
           echo "-------------------------"
+
+          # Sort by last modified timestamp (6th column)
           MODEL_FILE=$(echo "$LIST_OUT" | grep '\.onnx' | sort -t',' -k6,6r | head -n1 | cut -d',' -f1 | tr -d '"')
           if [ -z "$MODEL_FILE" ]; then
-            echo "❌ No .onnx file found in @ML_MODELS_STAGE. Exiting."
+            echo "❌ No .onnx files found in @ML_MODELS_STAGE."
             exit 1
           fi
-          echo "MODEL_FILE=${MODEL_FILE}" >> $GITHUB_OUTPUT
-          echo "✅ Selected model: ${MODEL_FILE}"
 
-      - name: Download latest ONNX model from stage
+          echo "✅ Found latest model: $MODEL_FILE"
+          echo "MODEL_FILE=$MODEL_FILE" >> $GITHUB_OUTPUT
+
+      - name: Download latest ONNX model
         shell: bash
         run: |
           MODEL_FILE="${{ steps.find_model.outputs.MODEL_FILE }}"
-          echo "📥 Downloading ${MODEL_FILE} to ./models/ ..."
+          echo "📥 Downloading model: ${MODEL_FILE}"
           mkdir -p models
           snow sql -q "GET @ML_MODELS_STAGE/${MODEL_FILE} FILE://models;" --format CSV
-          echo "✅ files in models/:"
-          ls -lh models || true
+          echo "✅ Downloaded files:"
+          ls -lh models
 
-      - name: Commit & push model
+      - name: Commit and push latest model
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           MODEL_FILE="${{ steps.find_model.outputs.MODEL_FILE }}"
-          echo "💾 Committing model ${MODEL_FILE} if changed..."
+          echo "💾 Preparing to commit ${MODEL_FILE}..."
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           git add models/
           git commit -m "Deploy latest ONNX model: ${MODEL_FILE}" || echo "No changes to commit."
-          git push || echo "Push failed (maybe protected branch or no permission)."
+          git push || echo "Push failed (protected branch or no changes)."
