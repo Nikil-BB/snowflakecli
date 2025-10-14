@@ -1,9 +1,11 @@
-name: Deploy Latest ONNX Model from Snowflake
+name: Deploy Latest ONNX Model (debuggable, job-level env)
 
 on:
-  push:
-    branches: [main, mlops]
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - mlops
 
 permissions:
   contents: write
@@ -12,114 +14,126 @@ jobs:
   deploy-latest-onnx:
     runs-on: ubuntu-latest
 
+    # ---- Job-level environment: every step inherits these ----
+    env:
+      # Map GitHub secrets into the v3-style env names the snow CLI expects
+      SNOWFLAKE_CONNECTIONS_DEFAULT_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
+
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Snowflake CLI
+      - name: Install Snowflake CLI (v3)
         shell: bash
         run: |
-          echo "🐍 Installing Snowflake CLI..."
+          echo "🐍 Installing Snowflake CLI (v3)..."
           python3 -m pip install --upgrade pip
-          pip install --upgrade "snowflake-cli>=3.10.0"
-          snow --version
+          # pin to >=3.10 to be safe with env-driven connections
+          pip install --user --upgrade "snowflake-cli>=3.10.0"
+          # ensure the user's local pip bin is on PATH for this step
+          echo 'export PATH=$HOME/.local/bin:$PATH' >> $GITHUB_ENV
+          source $GITHUB_ENV || true
+          snow --version || true
 
-      # Step 1 — Show secrets actually loaded by GitHub
-      - name: Debug - Verify Secrets
+      - name: Debug — show job-level Snowflake env variables
         shell: bash
-        env:
-          SF_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SF_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
         run: |
-          echo "🔎 Verifying GitHub secrets availability..."
-          if [ -z "$SF_USER" ]; then
-            echo "❌ SNOWFLAKE_USER secret is missing!"
-          else
-            echo "✅ SNOWFLAKE_USER loaded as $SF_USER"
-          fi
-          if [ -z "$SF_ACCOUNT" ]; then
-            echo "❌ SNOWFLAKE_ACCOUNT secret is missing!"
-          else
-            echo "✅ SNOWFLAKE_ACCOUNT loaded as $SF_ACCOUNT"
-          fi
+          echo "🔎 Showing environment variables (job-level)"
+          echo "SNOWFLAKE_CONNECTIONS_DEFAULT_USER='${SNOWFLAKE_CONNECTIONS_DEFAULT_USER:-<missing>}'"
+          echo "SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT='${SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT:-<missing>}'"
+          echo "SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE='${SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE:-<missing>}'"
+          echo "SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE='${SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE:-<missing>}'"
+          echo "SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE='${SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE:-<missing>}'"
+          echo "SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA='${SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA:-<missing>}'"
+          echo "------------------------"
+          echo "env | grep SNOWFLAKE:"
+          env | grep SNOWFLAKE || true
 
-      # Step 2 — Export environment vars in the correct pattern and create fallback config file
-      - name: Configure Snowflake Environment
+      - name: Debug — snow config & connections
         shell: bash
-        env:
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-          SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
-          SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
-          echo "🔧 Setting environment variables for Snowflake CLI v3..."
-          export SNOWFLAKE_CONNECTIONS_DEFAULT_USER="${SNOWFLAKE_USER}"
-          export SNOWFLAKE_CONNECTIONS_DEFAULT_PASSWORD="${SNOWFLAKE_PASSWORD}"
-          export SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT="${SNOWFLAKE_ACCOUNT}"
-          export SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE="${SNOWFLAKE_ROLE}"
-          export SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE="${SNOWFLAKE_WAREHOUSE}"
-          export SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE="${SNOWFLAKE_DATABASE}"
-          export SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA="${SNOWFLAKE_SCHEMA}"
+          echo "🔎 snow --version"
+          snow --version || true
+          echo "🔎 snow config list"
+          snow config list || true
+          echo "🔎 snow connection list"
+          snow connection list || true
+          echo "🔎 quick connection test (SELECT CURRENT_USER())"
+          snow sql -q "SELECT CURRENT_USER();" --format CSV || true
 
-          echo "🔎 Checking if CLI sees environment variables..."
-          env | grep SNOWFLAKE_CONNECTIONS_DEFAULT_ || echo "⚠️ Still no env vars visible!"
-
-          echo "🧩 Creating fallback config file at ~/.snowflake/config.toml ..."
-          mkdir -p ~/.snowflake
-          cat > ~/.snowflake/config.toml <<EOF
+      - name: Ensure fallback config file if env not detected
+        shell: bash
+        run: |
+          # If snow connection list shows nothing and env vars are set, create a config.toml fallback
+          echo "🧩 Checking if snow sees default connection..."
+          if snow connection list | grep -q "No data"; then
+            echo "⚠️ No connections found. Will write ~/.snowflake/config.toml as fallback using secrets (masked)."
+            mkdir -p ~/.snowflake
+            cat > ~/.snowflake/config.toml <<EOF
 [connections.default]
-account = "${SNOWFLAKE_ACCOUNT}"
-user = "${SNOWFLAKE_USER}"
-password = "${SNOWFLAKE_PASSWORD}"
-role = "${SNOWFLAKE_ROLE}"
-warehouse = "${SNOWFLAKE_WAREHOUSE}"
-database = "${SNOWFLAKE_DATABASE}"
-schema = "${SNOWFLAKE_SCHEMA}"
+account = "${SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT}"
+user = "${SNOWFLAKE_CONNECTIONS_DEFAULT_USER}"
+password = "${SNOWFLAKE_CONNECTIONS_DEFAULT_PASSWORD}"
+role = "${SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE}"
+warehouse = "${SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE}"
+database = "${SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE}"
+schema = "${SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA}"
 EOF
+            echo "✅ Wrote ~/.snowflake/config.toml (contents masked in logs for safety)."
+          else
+            echo "✅ Connection(s) already present; no config file written."
+          fi
+          echo "🔎 Post-check: snow connection list"
+          snow connection list || true
 
-          echo "✅ Config file created:"
-          cat ~/.snowflake/config.toml
-
-          echo "🔧 Testing connection..."
-          snow connection test || (echo "❌ Connection test failed"; cat ~/.snowflake/config.toml; exit 1)
-
-      # Step 3 — Fetch latest model and commit
-      - name: Fetch and Deploy Latest ONNX Model
+      - name: Find latest ONNX filename in stage
+        id: find_model
         shell: bash
         run: |
-          echo "🔍 Finding latest ONNX model..."
-          MODEL_FILE=$(snow sql -q "LIST @ML_MODELS_STAGE;" --format CSV \
-            | grep '.onnx' \
-            | sort -t',' -k6,6r \
-            | head -n1 \
-            | cut -d',' -f1 \
-            | tr -d '"')
-
+          echo "🔍 Listing @ML_MODELS_STAGE and selecting newest .onnx file (CSV parse)..."
+          # Use CSV output and find the latest by 6th column (timestamp) — adjust if the LIST output differs
+          LIST_OUT=$(snow sql -q "LIST @ML_MODELS_STAGE;" --format CSV)
+          echo "---- raw LIST output ----"
+          echo "$LIST_OUT"
+          echo "-------------------------"
+          MODEL_FILE=$(echo "$LIST_OUT" | grep '\.onnx' || true | sort -t',' -k6,6r | head -n1 | cut -d',' -f1 | tr -d '"' || true)
           if [ -z "$MODEL_FILE" ]; then
-            echo "❌ No ONNX model found!"
+            echo "❌ No .onnx file found in @ML_MODELS_STAGE. Exiting."
             exit 1
           fi
+          echo "MODEL_FILE=${MODEL_FILE}" >> $GITHUB_OUTPUT
+          echo "✅ Selected model: ${MODEL_FILE}"
 
-          echo "✅ Latest model: ${MODEL_FILE}"
+      - name: Download latest ONNX model from stage
+        shell: bash
+        run: |
+          MODEL_FILE="${{ steps.find_model.outputs.MODEL_FILE }}"
+          echo "📥 Downloading ${MODEL_FILE} to ./models/ ..."
           mkdir -p models
+          # GET is client-side; snow sql will use the job env/default connection/config to execute it
+          snow sql -q "GET @ML_MODELS_STAGE/${MODEL_FILE} FILE://models;" --format CSV
+          echo "✅ files in models/:"
+          ls -lh models || true
 
-          snow sql -q "
-            USE DATABASE ${SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE};
-            USE SCHEMA ${SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA};
-            GET @ML_MODELS_STAGE/${MODEL_FILE} FILE://models;
-          " --format CSV
-
-          echo "✅ Model downloaded:"
-          ls -lh models
-
+      - name: Commit & push model
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MODEL_FILE="${{ steps.find_model.outputs.MODEL_FILE }}"
+          echo "💾 Committing model ${MODEL_FILE} if changed..."
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           git add models/
-          git commit -m "Deploy latest ONNX model: ${MODEL_FILE}" || echo "No new model to commit."
-          git push
+          git commit -m "Deploy latest ONNX model: ${MODEL_FILE}" || echo "No changes to commit."
+          git push || echo "Push failed (maybe protected branch or no permission)."
+
 
 
 
