@@ -74,13 +74,15 @@ jobs:
           echo "$LIST_OUT"
           echo "-------------------------"
 
-          MODEL_FILE=$(echo "$LIST_OUT" | grep '\.onnx' | sort -t',' -k6,6r | head -n1 | cut -d',' -f1 | tr -d '"' | awk -F'/' '{print $NF}')
+          # Extract file names and timestamps, then pick most recent
+          MODEL_FILE=$(echo "$LIST_OUT" | grep '\.onnx' | awk -F',' '{print $1 "," $6}' | sort -t',' -k2,2r | head -n1 | cut -d',' -f1 | tr -d '"' | awk -F'/' '{print $NF}')
+          
           if [ -z "$MODEL_FILE" ]; then
             echo "❌ No .onnx files found in @ML_MODELS_STAGE."
             exit 1
           fi
 
-          echo "✅ Found latest model: $MODEL_FILE"
+          echo "✅ Latest ONNX model detected: $MODEL_FILE"
           echo "MODEL_FILE=$MODEL_FILE" >> $GITHUB_OUTPUT
 
       - name: Download latest ONNX model
@@ -89,7 +91,6 @@ jobs:
           MODEL_FILE="${{ steps.find_model.outputs.MODEL_FILE }}"
           echo "📥 Downloading model: ${MODEL_FILE}"
           mkdir -p models
-          # Correct CLI syntax for downloading stage file
           snow stage copy @ML_MODELS_STAGE/${MODEL_FILE} ./models/
           echo "✅ Downloaded files:"
           ls -lh models
