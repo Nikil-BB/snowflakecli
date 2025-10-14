@@ -74,9 +74,9 @@ jobs:
           echo "$LIST_OUT"
           echo "-------------------------"
 
-          # Extract filename and timestamp, convert timestamp to Unix time, sort newest first, and select latest
+          # Use correct timestamp column (4th), convert to Unix, and pick latest
           MODEL_FILE=$(echo "$LIST_OUT" | grep '\.onnx' | \
-            awk -F',' '{gsub(/"/,""); cmd="date -d \""$6"\" +%s"; cmd | getline t; close(cmd); print t","$1}' | \
+            awk -F',' '{gsub(/"/,""); cmd="date -d \""$4"\" +%s"; cmd | getline t; close(cmd); print t","$1}' | \
             sort -t',' -k1,1nr | head -n1 | cut -d',' -f2 | awk -F'/' '{print $NF}')
 
           if [ -z "$MODEL_FILE" ]; then
