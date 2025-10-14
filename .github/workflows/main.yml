@@ -16,7 +16,6 @@ jobs:
 
     # ---- Job-level environment: every step inherits these ----
     env:
-      # Map GitHub secrets into the v3-style env names the snow CLI expects
       SNOWFLAKE_CONNECTIONS_DEFAULT_USER: ${{ secrets.SNOWFLAKE_USER }}
       SNOWFLAKE_CONNECTIONS_DEFAULT_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
       SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
@@ -34,9 +33,7 @@ jobs:
         run: |
           echo "🐍 Installing Snowflake CLI (v3)..."
           python3 -m pip install --upgrade pip
-          # pin to >=3.10 to be safe with env-driven connections
           pip install --user --upgrade "snowflake-cli>=3.10.0"
-          # ensure the user's local pip bin is on PATH for this step
           echo 'export PATH=$HOME/.local/bin:$PATH' >> $GITHUB_ENV
           source $GITHUB_ENV || true
           snow --version || true
@@ -70,10 +67,9 @@ jobs:
       - name: Ensure fallback config file if env not detected
         shell: bash
         run: |
-          # If snow connection list shows nothing and env vars are set, create a config.toml fallback
           echo "🧩 Checking if snow sees default connection..."
           if snow connection list | grep -q "No data"; then
-            echo "⚠️ No connections found. Will write ~/.snowflake/config.toml as fallback using secrets (masked)."
+            echo "⚠️ No connections found. Will write ~/.snowflake/config.toml as fallback."
             mkdir -p ~/.snowflake
             cat > ~/.snowflake/config.toml <<EOF
 [connections.default]
@@ -85,7 +81,7 @@ warehouse = "${SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE}"
 database = "${SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE}"
 schema = "${SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA}"
 EOF
-            echo "✅ Wrote ~/.snowflake/config.toml (contents masked in logs for safety)."
+            echo "✅ Wrote ~/.snowflake/config.toml"
           else
             echo "✅ Connection(s) already present; no config file written."
           fi
@@ -96,13 +92,12 @@ EOF
         id: find_model
         shell: bash
         run: |
-          echo "🔍 Listing @ML_MODELS_STAGE and selecting newest .onnx file (CSV parse)..."
-          # Use CSV output and find the latest by 6th column (timestamp) — adjust if the LIST output differs
+          echo "🔍 Listing @ML_MODELS_STAGE and selecting newest .onnx file..."
           LIST_OUT=$(snow sql -q "LIST @ML_MODELS_STAGE;" --format CSV)
           echo "---- raw LIST output ----"
           echo "$LIST_OUT"
           echo "-------------------------"
-          MODEL_FILE=$(echo "$LIST_OUT" | grep '\.onnx' || true | sort -t',' -k6,6r | head -n1 | cut -d',' -f1 | tr -d '"' || true)
+          MODEL_FILE=$(echo "$LIST_OUT" | grep '\.onnx' | sort -t',' -k6,6r | head -n1 | cut -d',' -f1 | tr -d '"')
           if [ -z "$MODEL_FILE" ]; then
             echo "❌ No .onnx file found in @ML_MODELS_STAGE. Exiting."
             exit 1
@@ -116,7 +111,6 @@ EOF
           MODEL_FILE="${{ steps.find_model.outputs.MODEL_FILE }}"
           echo "📥 Downloading ${MODEL_FILE} to ./models/ ..."
           mkdir -p models
-          # GET is client-side; snow sql will use the job env/default connection/config to execute it
           snow sql -q "GET @ML_MODELS_STAGE/${MODEL_FILE} FILE://models;" --format CSV
           echo "✅ files in models/:"
           ls -lh models || true
@@ -133,7 +127,3 @@ EOF
           git add models/
           git commit -m "Deploy latest ONNX model: ${MODEL_FILE}" || echo "No changes to commit."
           git push || echo "Push failed (maybe protected branch or no permission)."
-
-
-
-
