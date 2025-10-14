@@ -71,7 +71,7 @@ jobs:
           if snow connection list | grep -q "No data"; then
             echo "⚠️ No connections found. Will write ~/.snowflake/config.toml as fallback."
             mkdir -p ~/.snowflake
-            cat > ~/.snowflake/config.toml <<EOF
+            cat <<'EOF' > ~/.snowflake/config.toml
 [connections.default]
 account = "${SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT}"
 user = "${SNOWFLAKE_CONNECTIONS_DEFAULT_USER}"
