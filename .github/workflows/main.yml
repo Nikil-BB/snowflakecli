@@ -74,38 +74,6 @@ jobs:
           echo "$LIST_OUT"
           echo "-------------------------"
 
-          # Use correct timestamp column (4th), convert to Unix, and pick latest
+          # Extract filename and timestamp (5th column), convert to Unix, sort newest first, and pick latest
           MODEL_FILE=$(echo "$LIST_OUT" | grep '\.onnx' | \
-            awk -F',' '{gsub(/"/,""); cmd="date -d \""$4"\" +%s"; cmd | getline t; close(cmd); print t","$1}' | \
-            sort -t',' -k1,1nr | head -n1 | cut -d',' -f2 | awk -F'/' '{print $NF}')
-
-          if [ -z "$MODEL_FILE" ]; then
-            echo "❌ No .onnx files found in @ML_MODELS_STAGE."
-            exit 1
-          fi
-
-          echo "✅ Latest ONNX model detected: $MODEL_FILE"
-          echo "MODEL_FILE=$MODEL_FILE" >> $GITHUB_OUTPUT
-
-      - name: Download latest ONNX model
-        shell: bash
-        run: |
-          MODEL_FILE="${{ steps.find_model.outputs.MODEL_FILE }}"
-          echo "📥 Downloading model: ${MODEL_FILE}"
-          mkdir -p models
-          snow stage copy @ML_MODELS_STAGE/${MODEL_FILE} ./models/
-          echo "✅ Downloaded files:"
-          ls -lh models
-
-      - name: Commit and push latest model
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          MODEL_FILE="${{ steps.find_model.outputs.MODEL_FILE }}"
-          echo "💾 Preparing to commit ${MODEL_FILE}..."
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-          git add models/
-          git commit -m "Deploy latest ONNX model: ${MODEL_FILE}" || echo "No changes to commit."
-          git push || echo "Push failed (protected branch or no changes)."
+            awk -F',' '{gsub(/"/,""); cmd="date -d
