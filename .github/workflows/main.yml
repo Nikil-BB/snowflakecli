@@ -37,14 +37,14 @@ jobs:
           snow --version
 
       # --------------------------
-      # Step 4: Configure Snowflake Connection (v2.x syntax)
+      # Step 4: Configure Snowflake Connection (using --host)
       # --------------------------
       - name: Configure Snowflake Connection
         shell: bash
         env:
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
           SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}   # e.g. xy12345.ap-south-1 (❌ no .snowflakecomputing.com)
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}   # SZBYXJW-ZU11428.snowflakecomputing.com
           SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
           SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
           SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
@@ -53,7 +53,7 @@ jobs:
           echo "🔧 Configuring Snowflake connection..."
           snow connection add \
             --connection-name myconn \
-            --account "${SNOWFLAKE_ACCOUNT}" \
+            --host "${SNOWFLAKE_ACCOUNT}" \
             --username "${SNOWFLAKE_USER}" \
             --password "${SNOWFLAKE_PASSWORD}" \
             --warehouse "${SNOWFLAKE_WAREHOUSE}" \
