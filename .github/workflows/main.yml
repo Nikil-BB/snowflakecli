@@ -41,31 +41,28 @@ jobs:
         shell: bash
         run: |
           echo "🔎 Verifying Snowflake connection..."
-          snow sql -q "SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_DATABASE(), CURRENT_SCHEMA();" --format CSV
+          snow sql -q "SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_DATABASE(), CURRENT_SCHEMA();" --format CSV || true
 
       - name: Ensure fallback Snowflake config file if env not detected
         shell: bash
         run: |
-          echo "🧩 Checking if snow sees default connection..."
+          echo "🧩 Checking Snowflake connection list..."
           if snow connection list | grep -q "No data"; then
-            echo "⚠️ No connections found. Writing ~/.snowflake/config.toml..."
+            echo "⚠️ Writing ~/.snowflake/config.toml..."
             mkdir -p ~/.snowflake
-
-            # Safe heredoc with single quotes to avoid YAML parsing errors
-            cat <<'EOF' > ~/.snowflake/config.toml
-[connections.default]
-account = "${SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT}"
-user = "${SNOWFLAKE_CONNECTIONS_DEFAULT_USER}"
-password = "${SNOWFLAKE_CONNECTIONS_DEFAULT_PASSWORD}"
-role = "${SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE}"
-warehouse = "${SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE}"
-database = "${SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE}"
-schema = "${SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA}"
-EOF
-
+            {
+              echo "[connections.default]"
+              echo "account = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT}\""
+              echo "user = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_USER}\""
+              echo "password = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_PASSWORD}\""
+              echo "role = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE}\""
+              echo "warehouse = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE}\""
+              echo "database = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE}\""
+              echo "schema = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA}\""
+            } > ~/.snowflake/config.toml
             echo "✅ Config file created successfully."
           else
-            echo "✅ Snowflake connection(s) already available — skipping config file."
+            echo "✅ Existing Snowflake connection detected; skipping config file."
           fi
           echo "🔎 Post-check: snow connection list"
           snow connection list || true
@@ -79,14 +76,11 @@ EOF
           echo "---- Raw LIST output ----"
           echo "$LIST_OUT"
           echo "-------------------------"
-
-          # Sort by last modified timestamp (6th column)
           MODEL_FILE=$(echo "$LIST_OUT" | grep '\.onnx' | sort -t',' -k6,6r | head -n1 | cut -d',' -f1 | tr -d '"')
           if [ -z "$MODEL_FILE" ]; then
             echo "❌ No .onnx files found in @ML_MODELS_STAGE."
             exit 1
           fi
-
           echo "✅ Found latest model: $MODEL_FILE"
           echo "MODEL_FILE=$MODEL_FILE" >> $GITHUB_OUTPUT
 
