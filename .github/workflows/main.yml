@@ -13,14 +13,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # --------------------------
-      # Step 1: Checkout Repository
-      # --------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       # --------------------------
-      # Step 2: Install Snowflake CLI manually (stable method)
+      # Step 1: Install Snowflake CLI manually (stable)
       # --------------------------
       - name: Install Snowflake CLI manually
         shell: bash
@@ -31,9 +28,9 @@ jobs:
           snow --version
 
       # --------------------------
-      # Step 3: Connect and Deploy Latest ONNX Model
+      # Step 2: Configure Snowflake connection
       # --------------------------
-      - name: Fetch and Deploy Latest ONNX Model
+      - name: Configure Snowflake Connection
         shell: bash
         env:
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
@@ -44,11 +41,29 @@ jobs:
           SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
           SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
-          echo "🔗 Connecting to Snowflake using environment variables..."
-          echo "🔍 Finding latest ONNX model..."
+          echo "🔧 Creating a Snowflake CLI connection..."
+          snow connection add myconn \
+            --host "${SNOWFLAKE_ACCOUNT}" \
+            --username "${SNOWFLAKE_USER}" \
+            --password "${SNOWFLAKE_PASSWORD}" \
+            --warehouse "${SNOWFLAKE_WAREHOUSE}" \
+            --database "${SNOWFLAKE_DATABASE}" \
+            --schema "${SNOWFLAKE_SCHEMA}" \
+            --rolename "${SNOWFLAKE_ROLE}"
 
-          # List all files in the Snowflake stage and sort to get latest
-          MODEL_FILE=$(snow sql -q "LIST @ML_MODELS_STAGE;" --format CSV | grep '.onnx' | sort -t',' -k6,6r | head -n1 | cut -d',' -f1 | tr -d '"')
+          echo "✅ Connection created successfully!"
+          snow connection list
+
+      # --------------------------
+      # Step 3: Use that connection to pull latest ONNX model
+      # --------------------------
+      - name: Fetch and Deploy Latest ONNX Model
+        shell: bash
+        run: |
+          echo "🔗 Connecting using configured Snowflake connection (myconn)..."
+
+          echo "🔍 Finding latest ONNX model..."
+          MODEL_FILE=$(snow -c myconn sql -q "LIST @ML_MODELS_STAGE;" --format CSV | grep '.onnx' | sort -t',' -k6,6r | head -n1 | cut -d',' -f1 | tr -d '"')
           
           if [ -z "$MODEL_FILE" ]; then
             echo "❌ No ONNX model found in ML_MODELS_STAGE!"
@@ -59,9 +74,9 @@ jobs:
 
           echo "📥 Downloading ${MODEL_FILE}..."
           mkdir -p models
-          snow sql -q "
-            USE DATABASE ${SNOWFLAKE_DATABASE};
-            USE SCHEMA ${SNOWFLAKE_SCHEMA};
+          snow -c myconn sql -q "
+            USE DATABASE POWERCONSUMPTION;
+            USE SCHEMA PUBLIC;
             GET @ML_MODELS_STAGE/${MODEL_FILE} FILE://models;
           " --format CSV
 
