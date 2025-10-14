@@ -16,56 +16,38 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # --------------------------
-      # Step 1: Install Snowflake CLI (v3.x compatible)
-      # --------------------------
+      # Step 1: Install Snowflake CLI
       - name: Install Snowflake CLI
         shell: bash
         run: |
-          echo "🐍 Installing Snowflake CLI..."
+          echo "🐍 Installing Snowflake CLI (v3)..."
           python3 -m pip install --upgrade pip
-          pip install --upgrade "snowflake-cli-labs>=3.12.0"
+          pip install --upgrade "snowflake-cli>=3.10.0"
           snow --version
 
-      # --------------------------
-      # Step 2: Configure Snowflake Connection (new syntax)
-      # --------------------------
-      - name: Configure Snowflake Connection
+      # Step 2: Fetch and Deploy Latest ONNX Model using env variables (no connection add)
+      - name: Fetch and Deploy Latest ONNX Model
         shell: bash
         env:
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
           SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}   # e.g. SZBYXJW-ZU11428.snowflakecomputing.com
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
           SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
           SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
           SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
           SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
-          echo "🔧 Creating Snowflake CLI connection (v3 syntax)..."
-          snow connection add \
-            --name myconn \
-            --host "${SNOWFLAKE_ACCOUNT}" \
-            --username "${SNOWFLAKE_USER}" \
-            --password "${SNOWFLAKE_PASSWORD}" \
-            --warehouse "${SNOWFLAKE_WAREHOUSE}" \
-            --database "${SNOWFLAKE_DATABASE}" \
-            --schema "${SNOWFLAKE_SCHEMA}" \
-            --rolename "${SNOWFLAKE_ROLE}"
-
-          echo "✅ Connection created successfully!"
-          snow connection list
-
-      # --------------------------
-      # Step 3: Use connection to fetch and commit latest ONNX model
-      # --------------------------
-      - name: Fetch and Deploy Latest ONNX Model
-        shell: bash
-        run: |
-          echo "🔗 Using configured Snowflake connection (myconn)..."
+          echo "🔗 Connecting to Snowflake using environment variables..."
           echo "🔍 Finding latest ONNX model..."
 
-          MODEL_FILE=$(snow -c myconn sql -q "LIST @ML_MODELS_STAGE;" --format CSV | grep '.onnx' | sort -t',' -k6,6r | head -n1 | cut -d',' -f1 | tr -d '"')
-          
+          # list all ONNX models in the stage
+          MODEL_FILE=$(snow sql -q "LIST @ML_MODELS_STAGE;" --format CSV \
+            | grep '.onnx' \
+            | sort -t',' -k6,6r \
+            | head -n1 \
+            | cut -d',' -f1 \
+            | tr -d '"')
+
           if [ -z "$MODEL_FILE" ]; then
             echo "❌ No ONNX model found in ML_MODELS_STAGE!"
             exit 1
@@ -75,9 +57,9 @@ jobs:
 
           echo "📥 Downloading ${MODEL_FILE}..."
           mkdir -p models
-          snow -c myconn sql -q "
-            USE DATABASE POWERCONSUMPTION;
-            USE SCHEMA PUBLIC;
+          snow sql -q "
+            USE DATABASE ${SNOWFLAKE_DATABASE};
+            USE SCHEMA ${SNOWFLAKE_SCHEMA};
             GET @ML_MODELS_STAGE/${MODEL_FILE} FILE://models;
           " --format CSV
 
@@ -90,5 +72,6 @@ jobs:
           git add models/
           git commit -m "Deploy latest ONNX model: ${MODEL_FILE}" || echo "No new model to commit."
           git push
+
 
 
