@@ -53,17 +53,15 @@ jobs:
             echo "schema = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA}\""
           } > ~/.snowflake/config.toml
 
-          # Fix permissions to satisfy Snowflake CLI
           chmod 600 ~/.snowflake/config.toml
           echo "✅ Config file created and secured."
-          echo "🔎 Config content preview (masked):"
           grep -v "password" ~/.snowflake/config.toml
 
       - name: Verify Snowflake connection
         shell: bash
         run: |
           echo "🔎 Testing Snowflake connection..."
-          snow connection list || true
+          snow connection list
           snow sql -q "SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_DATABASE(), CURRENT_SCHEMA();" --format CSV
 
       - name: Find latest ONNX file in Snowflake stage
@@ -75,6 +73,7 @@ jobs:
           echo "---- Raw LIST output ----"
           echo "$LIST_OUT"
           echo "-------------------------"
+
           MODEL_FILE=$(echo "$LIST_OUT" | grep '\.onnx' | sort -t',' -k6,6r | head -n1 | cut -d',' -f1 | tr -d '"')
           if [ -z "$MODEL_FILE" ]; then
             echo "❌ No .onnx files found in @ML_MODELS_STAGE."
@@ -89,7 +88,8 @@ jobs:
           MODEL_FILE="${{ steps.find_model.outputs.MODEL_FILE }}"
           echo "📥 Downloading model: ${MODEL_FILE}"
           mkdir -p models
-          snow sql -q "GET @ML_MODELS_STAGE/${MODEL_FILE} FILE://models;" --format CSV
+          # Correct CLI syntax for file download
+          snow stage copy @ML_MODELS_STAGE/${MODEL_FILE} ./models/
           echo "✅ Downloaded files:"
           ls -lh models
 
