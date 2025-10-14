@@ -13,11 +13,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # --------------------------
+      # Step 1: Checkout Repository
+      # --------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       # --------------------------
-      # Step 1: Install Snowflake CLI manually (stable method)
+      # Step 2: Install Snowflake CLI manually (stable method)
       # --------------------------
       - name: Install Snowflake CLI manually
         shell: bash
@@ -28,7 +31,7 @@ jobs:
           snow --version
 
       # --------------------------
-      # Step 2: Connect using environment variables and deploy latest model
+      # Step 3: Connect and Deploy Latest ONNX Model
       # --------------------------
       - name: Fetch and Deploy Latest ONNX Model
         shell: bash
@@ -42,20 +45,25 @@ jobs:
           SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
           echo "🔗 Connecting to Snowflake using environment variables..."
-
           echo "🔍 Finding latest ONNX model..."
-          MODEL_FILE=$(snow sql -q "
-            LIST @ML_MODELS_STAGE;
-          " --format plain | grep '.onnx' | sort -k6,6r | head -n1 | awk '{print $1}' | tr -d '[:space:]')
-          echo "✅ Latest model: ${MODEL_FILE}"
 
-          echo "📥 Downloading model ${MODEL_FILE}..."
+          # List all files in the Snowflake stage and sort to get latest
+          MODEL_FILE=$(snow sql -q "LIST @ML_MODELS_STAGE;" --format CSV | grep '.onnx' | sort -t',' -k6,6r | head -n1 | cut -d',' -f1 | tr -d '"')
+          
+          if [ -z "$MODEL_FILE" ]; then
+            echo "❌ No ONNX model found in ML_MODELS_STAGE!"
+            exit 1
+          fi
+
+          echo "✅ Latest model identified: ${MODEL_FILE}"
+
+          echo "📥 Downloading ${MODEL_FILE}..."
           mkdir -p models
           snow sql -q "
             USE DATABASE ${SNOWFLAKE_DATABASE};
             USE SCHEMA ${SNOWFLAKE_SCHEMA};
             GET @ML_MODELS_STAGE/${MODEL_FILE} FILE://models;
-          " --format plain
+          " --format CSV
 
           echo "✅ Model files downloaded:"
           ls -lh models
@@ -66,5 +74,6 @@ jobs:
           git add models/
           git commit -m "Deploy latest ONNX model: ${MODEL_FILE}" || echo "No new model to commit."
           git push
+
 
 
