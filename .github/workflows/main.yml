@@ -17,18 +17,18 @@ jobs:
         uses: actions/checkout@v4
 
       # --------------------------
-      # Step 1: Install Snowflake CLI manually (stable)
+      # Step 1: Install Snowflake CLI (v3.x compatible)
       # --------------------------
-      - name: Install Snowflake CLI manually
+      - name: Install Snowflake CLI
         shell: bash
         run: |
           echo "🐍 Installing Snowflake CLI..."
           python3 -m pip install --upgrade pip
-          pip install --upgrade "snowflake-cli-labs>=2.1.0"
+          pip install --upgrade "snowflake-cli-labs>=3.12.0"
           snow --version
 
       # --------------------------
-      # Step 2: Configure Snowflake connection
+      # Step 2: Configure Snowflake Connection (new syntax)
       # --------------------------
       - name: Configure Snowflake Connection
         shell: bash
@@ -41,8 +41,9 @@ jobs:
           SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
           SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
         run: |
-          echo "🔧 Creating a Snowflake CLI connection..."
-          snow connection add myconn \
+          echo "🔧 Creating Snowflake CLI connection (v3 syntax)..."
+          snow connection add \
+            --name myconn \
             --host "${SNOWFLAKE_ACCOUNT}" \
             --username "${SNOWFLAKE_USER}" \
             --password "${SNOWFLAKE_PASSWORD}" \
@@ -55,14 +56,14 @@ jobs:
           snow connection list
 
       # --------------------------
-      # Step 3: Use that connection to pull latest ONNX model
+      # Step 3: Use connection to fetch and commit latest ONNX model
       # --------------------------
       - name: Fetch and Deploy Latest ONNX Model
         shell: bash
         run: |
-          echo "🔗 Connecting using configured Snowflake connection (myconn)..."
-
+          echo "🔗 Using configured Snowflake connection (myconn)..."
           echo "🔍 Finding latest ONNX model..."
+
           MODEL_FILE=$(snow -c myconn sql -q "LIST @ML_MODELS_STAGE;" --format CSV | grep '.onnx' | sort -t',' -k6,6r | head -n1 | cut -d',' -f1 | tr -d '"')
           
           if [ -z "$MODEL_FILE" ]; then
@@ -89,6 +90,5 @@ jobs:
           git add models/
           git commit -m "Deploy latest ONNX model: ${MODEL_FILE}" || echo "No new model to commit."
           git push
-
 
 
