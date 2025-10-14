@@ -37,35 +37,34 @@ jobs:
           source $GITHUB_ENV
           snow --version
 
+      - name: Configure Snowflake connection
+        shell: bash
+        run: |
+          echo "🧩 Creating ~/.snowflake/config.toml..."
+          mkdir -p ~/.snowflake
+          {
+            echo "[connections.default]"
+            echo "account = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT}\""
+            echo "user = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_USER}\""
+            echo "password = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_PASSWORD}\""
+            echo "role = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE}\""
+            echo "warehouse = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE}\""
+            echo "database = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE}\""
+            echo "schema = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA}\""
+          } > ~/.snowflake/config.toml
+
+          # Fix permissions to satisfy Snowflake CLI
+          chmod 600 ~/.snowflake/config.toml
+          echo "✅ Config file created and secured."
+          echo "🔎 Config content preview (masked):"
+          grep -v "password" ~/.snowflake/config.toml
+
       - name: Verify Snowflake connection
         shell: bash
         run: |
-          echo "🔎 Verifying Snowflake connection..."
-          snow sql -q "SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_DATABASE(), CURRENT_SCHEMA();" --format CSV || true
-
-      - name: Ensure fallback Snowflake config file if env not detected
-        shell: bash
-        run: |
-          echo "🧩 Checking Snowflake connection list..."
-          if snow connection list | grep -q "No data"; then
-            echo "⚠️ Writing ~/.snowflake/config.toml..."
-            mkdir -p ~/.snowflake
-            {
-              echo "[connections.default]"
-              echo "account = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_ACCOUNT}\""
-              echo "user = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_USER}\""
-              echo "password = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_PASSWORD}\""
-              echo "role = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_ROLE}\""
-              echo "warehouse = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_WAREHOUSE}\""
-              echo "database = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_DATABASE}\""
-              echo "schema = \"${SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA}\""
-            } > ~/.snowflake/config.toml
-            echo "✅ Config file created successfully."
-          else
-            echo "✅ Existing Snowflake connection detected; skipping config file."
-          fi
-          echo "🔎 Post-check: snow connection list"
+          echo "🔎 Testing Snowflake connection..."
           snow connection list || true
+          snow sql -q "SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_DATABASE(), CURRENT_SCHEMA();" --format CSV
 
       - name: Find latest ONNX file in Snowflake stage
         id: find_model
