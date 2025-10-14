@@ -1,1 +1,1 @@
-# snowflakecli.
+# snowflakecli
