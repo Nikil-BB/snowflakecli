@@ -1,4 +1,4 @@
-name: Deploy Latest ONNX Model with SonarQube Analysis
+name: SonarQube Scan + Deploy Latest ONNX Model from Snowflake
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ jobs:
       SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
 
     steps:
-      # 1️⃣ Checkout repository
+      # 1️⃣ Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -38,22 +38,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt || true
 
-      # 3️⃣ Run SonarQube analysis (code quality)
+      # 3️⃣ Run SonarCloud scan
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        with:
-          args: >
-            -Dsonar.projectKey=willow-ml_models
-            -Dsonar.projectName=Willow ML Models
-            -Dsonar.python.version=3.10
-            -Dsonar.sources=.
-            -Dsonar.sourceEncoding=UTF-8
-            -Dsonar.exclusions=**/venv/**,**/__pycache__/**,**/models/**
 
-      # 4️⃣ Optionally enforce SonarQube Quality Gate
+      # 4️⃣ Enforce SonarCloud Quality Gate (optional but recommended)
       - name: SonarQube Quality Gate Check
         uses: SonarSource/sonarqube-quality-gate-action@v1
         env:
@@ -65,7 +57,7 @@ jobs:
         shell: bash
         run: |
           echo "🐍 Installing Snowflake CLI..."
-          pip install --user --upgrade "snowflake-cli>=3.10.0"
+          python3 -m pip install --upgrade "snowflake-cli>=3.10.0"
           echo 'export PATH=$HOME/.local/bin:$PATH' >> $GITHUB_ENV
           source $GITHUB_ENV
           snow --version
@@ -88,7 +80,7 @@ jobs:
           } > ~/.snowflake/config.toml
 
           chmod 600 ~/.snowflake/config.toml
-          grep -v "password" ~/.snowflake/config.toml
+          echo "✅ Snowflake config created (password hidden)."
 
       # 7️⃣ Verify Snowflake connection
       - name: Verify Snowflake connection
@@ -98,8 +90,8 @@ jobs:
           snow connection list
           snow sql -q "SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_DATABASE(), CURRENT_SCHEMA();" --format CSV
 
-      # 8️⃣ Find latest ONNX file in Snowflake stage
-      - name: Find latest ONNX file in Snowflake stage
+      # 8️⃣ Find latest ONNX model in Snowflake stage
+      - name: Find latest ONNX model in Snowflake stage
         id: find_model
         shell: bash
         run: |
@@ -132,7 +124,7 @@ jobs:
           echo "✅ Files downloaded:"
           ls -lh models
 
-      # 🔟 Commit and push latest model
+      # 🔟 Commit and push latest ONNX model
       - name: Commit and push latest model
         shell: bash
         env:
@@ -143,10 +135,10 @@ jobs:
           git config --global user.email "actions@github.com"
           git add models/
           git commit -m "Deploy latest ONNX model: ${MODEL_FILE}" || echo "No changes to commit."
-          git push || echo "Push failed (protected branch or no changes)."
+          git push || echo "Push skipped (protected branch or no changes)."
 
       # 1️⃣1️⃣ Upload logs for observability
-      - name: Upload logs
+      - name: Upload Snowflake logs
         uses: actions/upload-artifact@v4
         with:
           name: snowflake-logs
