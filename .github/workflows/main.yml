@@ -1,17 +1,16 @@
-name: Deploy Latest ONNX Model from Snowflake
+name: Deploy Latest ONNX Model with SonarQube Analysis
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-     
 
 permissions:
   contents: write
 
 jobs:
-  deploy-latest-onnx:
+  sonar-and-deploy:
     runs-on: ubuntu-latest
 
     env:
@@ -24,19 +23,54 @@ jobs:
       SNOWFLAKE_CONNECTIONS_DEFAULT_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
 
     steps:
+      # 1️⃣ Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Snowflake CLI (v3)
+      # 2️⃣ Set up Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+
+      # 3️⃣ Run SonarQube analysis (code quality)
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=willow-ml_models
+            -Dsonar.projectName=Willow ML Models
+            -Dsonar.python.version=3.10
+            -Dsonar.sources=.
+            -Dsonar.sourceEncoding=UTF-8
+            -Dsonar.exclusions=**/venv/**,**/__pycache__/**,**/models/**
+
+      # 4️⃣ Optionally enforce SonarQube Quality Gate
+      - name: SonarQube Quality Gate Check
+        uses: SonarSource/sonarqube-quality-gate-action@v1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      # 5️⃣ Install Snowflake CLI (v3)
+      - name: Install Snowflake CLI
         shell: bash
         run: |
           echo "🐍 Installing Snowflake CLI..."
-          python3 -m pip install --upgrade pip
           pip install --user --upgrade "snowflake-cli>=3.10.0"
           echo 'export PATH=$HOME/.local/bin:$PATH' >> $GITHUB_ENV
           source $GITHUB_ENV
           snow --version
 
+      # 6️⃣ Configure Snowflake connection
       - name: Configure Snowflake connection
         shell: bash
         run: |
@@ -54,9 +88,9 @@ jobs:
           } > ~/.snowflake/config.toml
 
           chmod 600 ~/.snowflake/config.toml
-          echo "✅ Config file created and secured."
           grep -v "password" ~/.snowflake/config.toml
 
+      # 7️⃣ Verify Snowflake connection
       - name: Verify Snowflake connection
         shell: bash
         run: |
@@ -64,21 +98,18 @@ jobs:
           snow connection list
           snow sql -q "SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_DATABASE(), CURRENT_SCHEMA();" --format CSV
 
+      # 8️⃣ Find latest ONNX file in Snowflake stage
       - name: Find latest ONNX file in Snowflake stage
         id: find_model
         shell: bash
         run: |
           echo "🔍 Searching for latest .onnx file in @ML_MODELS_STAGE..."
           LIST_OUT=$(snow sql -q "LIST @ML_MODELS_STAGE;" --format CSV)
-          echo "---- Raw LIST output ----"
-          echo "$LIST_OUT"
-          echo "-------------------------"
-
-          # Extract filename + timestamp (5th column), clean quotes, convert to epoch, sort by newest
+          echo "$LIST_OUT" > snowflake_list.csv
           MODEL_FILE=$(echo "$LIST_OUT" | grep '\.onnx' | \
             awk -F',' '{
-              gsub(/"/, "", $5);                      # remove quotes around timestamp
-              cmd = "date -d \"" $5 "\" +%s";         # convert to epoch
+              gsub(/"/, "", $5);
+              cmd = "date -d \"" $5 "\" +%s";
               cmd | getline t; close(cmd);
               print t "," $1;
             }' | sort -t',' -k1,1nr | head -n1 | cut -d',' -f2 | awk -F'/' '{print $NF}')
@@ -87,10 +118,10 @@ jobs:
             echo "❌ No .onnx files found in @ML_MODELS_STAGE."
             exit 1
           fi
-
-          echo "✅ Latest ONNX model detected: $MODEL_FILE"
+          echo "✅ Latest ONNX model: $MODEL_FILE"
           echo "MODEL_FILE=$MODEL_FILE" >> $GITHUB_OUTPUT
 
+      # 9️⃣ Download latest ONNX model
       - name: Download latest ONNX model
         shell: bash
         run: |
@@ -98,18 +129,27 @@ jobs:
           echo "📥 Downloading model: ${MODEL_FILE}"
           mkdir -p models
           snow stage copy @ML_MODELS_STAGE/${MODEL_FILE} ./models/
-          echo "✅ Downloaded files:"
+          echo "✅ Files downloaded:"
           ls -lh models
 
+      # 🔟 Commit and push latest model
       - name: Commit and push latest model
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           MODEL_FILE="${{ steps.find_model.outputs.MODEL_FILE }}"
-          echo "💾 Preparing to commit ${MODEL_FILE}..."
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           git add models/
           git commit -m "Deploy latest ONNX model: ${MODEL_FILE}" || echo "No changes to commit."
           git push || echo "Push failed (protected branch or no changes)."
+
+      # 1️⃣1️⃣ Upload logs for observability
+      - name: Upload logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: snowflake-logs
+          path: |
+            snowflake_list.csv
+            models/
